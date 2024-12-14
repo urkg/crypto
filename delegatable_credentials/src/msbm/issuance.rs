@@ -12,12 +12,13 @@ use crate::{
     set_commitment::{SetCommitment, SetCommitmentOpening, SetCommitmentSRS},
 };
 use ark_ec::pairing::Pairing;
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{rand::RngCore, vec::Vec, UniformRand};
 use schnorr_pok::discrete_log::PokDiscreteLog;
 
 /// Credential issued by a root or delegated issuer when it knows the randomness for set commitments
 /// of attributes
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize)]
 pub struct Credential<E: Pairing> {
     pub max_attributes_per_commitment: u32,
     pub attributes: Vec<Vec<E::ScalarField>>,
