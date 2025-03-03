@@ -11,6 +11,7 @@ use oblivious_transfer_protocols::{
     configs::OTEConfig,
     ot_extensions::kos_ote::{OTExtensionReceiverSetup, OTExtensionSenderSetup},
 };
+use sha3::Shake256;
 
 fn kos_ote(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0u64);
@@ -54,18 +55,19 @@ fn kos_ote(c: &mut Criterion) {
             format!("OT extension receiver setup {}", otc).as_str(),
             |b| {
                 b.iter(|| {
-                    OTExtensionReceiverSetup::new::<_, SSP>(
+                    let r = OTExtensionReceiverSetup::new::<_, Shake256, SSP>(
                         &mut rng,
                         black_box(ote_config),
                         black_box(ot_ext_choices.clone()),
                         black_box(base_ot_sender_keys.clone()),
                     )
                     .unwrap();
+                    black_box(r)
                 })
             },
         );
 
-        let (ext_receiver_setup, u, rlc) = OTExtensionReceiverSetup::new::<_, SSP>(
+        let (ext_receiver_setup, u, rlc) = OTExtensionReceiverSetup::new::<_, Shake256, SSP>(
             &mut rng,
             ote_config,
             ot_ext_choices.clone(),
@@ -81,19 +83,20 @@ fn kos_ote(c: &mut Criterion) {
             format!("OT extension receiver setup {}", otc).as_str(),
             |b| {
                 b.iter(|| {
-                    OTExtensionSenderSetup::new::<SSP>(
+                    let r = OTExtensionSenderSetup::new::<Shake256, SSP>(
                         black_box(ote_config),
                         black_box(u.clone()),
                         black_box(rlc.clone()),
                         black_box(base_ot_choices.clone()),
                         black_box(base_ot_receiver_keys.clone()),
                     )
-                    .unwrap()
+                    .unwrap();
+                    black_box(r)
                 })
             },
         );
 
-        let ext_sender_setup = OTExtensionSenderSetup::new::<SSP>(
+        let ext_sender_setup = OTExtensionSenderSetup::new::<Shake256, SSP>(
             ote_config,
             u,
             rlc,
@@ -104,26 +107,31 @@ fn kos_ote(c: &mut Criterion) {
 
         c.bench_function(format!("Encrypt chosen messages {}", otc).as_str(), |b| {
             b.iter(|| {
-                ext_sender_setup
+                let r = ext_sender_setup
                     .clone()
-                    .encrypt(black_box(messages.clone()), black_box(message_size as u32))
-                    .unwrap()
+                    .encrypt::<Shake256>(
+                        black_box(messages.clone()),
+                        black_box(message_size as u32),
+                    )
+                    .unwrap();
+                black_box(r)
             })
         });
 
         let encryptions = ext_sender_setup
-            .encrypt(messages.clone(), message_size as u32)
+            .encrypt::<Shake256>(messages.clone(), message_size as u32)
             .unwrap();
 
         c.bench_function(format!("Decrypt chosen messages {}", otc).as_str(), |b| {
             b.iter(|| {
-                ext_receiver_setup
+                let r = ext_receiver_setup
                     .clone()
-                    .decrypt(
+                    .decrypt::<Shake256>(
                         black_box(encryptions.clone()),
                         black_box(message_size as u32),
                     )
-                    .unwrap()
+                    .unwrap();
+                black_box(r)
             })
         });
 
@@ -133,9 +141,10 @@ fn kos_ote(c: &mut Criterion) {
 
         c.bench_function(format!("Encrypt correlations {}", otc).as_str(), |b| {
             b.iter(|| {
-                ext_sender_setup
+                let r = ext_sender_setup
                     .transfer::<Fr, Blake2b512>(alpha.clone())
-                    .unwrap()
+                    .unwrap();
+                black_box(r)
             })
         });
 
@@ -145,9 +154,10 @@ fn kos_ote(c: &mut Criterion) {
 
         c.bench_function(format!("Decrypt correlations {}", otc).as_str(), |b| {
             b.iter(|| {
-                ext_receiver_setup
+                let r = ext_receiver_setup
                     .receive::<Fr, Blake2b512>(black_box(tau.clone()))
-                    .unwrap()
+                    .unwrap();
+                black_box(r)
             })
         });
     }

@@ -1,6 +1,10 @@
 use ark_bls12_381::Bls12_381;
 use ark_ec::pairing::Pairing;
-use ark_std::{rand::prelude::StdRng, UniformRand};
+use ark_std::{
+    collections::{BTreeMap, BTreeSet},
+    rand::prelude::StdRng,
+    UniformRand,
+};
 use blake2::Blake2b512;
 use oblivious_transfer_protocols::{
     base_ot::simplest_ot::{OneOfTwoROTSenderKeys, ROTReceiverKeys},
@@ -9,7 +13,7 @@ use oblivious_transfer_protocols::{
     },
     Bit, ParticipantId,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use sha3::Shake256;
 
 pub fn check_base_ot_keys(
     choices: &[Bit],
@@ -49,7 +53,7 @@ pub fn do_pairwise_base_ot<const KEY_SIZE: u16>(
     for (sender_id, pks) in sender_pks {
         for (id, pk) in pks {
             let recv_pk = base_ots[id as usize - 1]
-                .receive_sender_pubkey::<_, Blake2b512, KEY_SIZE>(rng, sender_id, pk, &B)
+                .receive_sender_pubkey::<_, Blake2b512, Shake256, KEY_SIZE>(rng, sender_id, pk, &B)
                 .unwrap();
             receiver_pks.insert((id, sender_id), recv_pk);
         }
@@ -61,14 +65,14 @@ pub fn do_pairwise_base_ot<const KEY_SIZE: u16>(
 
     for ((sender, receiver), pk) in receiver_pks {
         let chal = base_ots[receiver as usize - 1]
-            .receive_receiver_pubkey::<KEY_SIZE>(sender, pk)
+            .receive_receiver_pubkey::<Blake2b512, Shake256, KEY_SIZE>(sender, pk)
             .unwrap();
         challenges.insert((receiver, sender), chal);
     }
 
     for ((sender, receiver), chal) in challenges {
         let resp = base_ots[receiver as usize - 1]
-            .receive_challenges(sender, chal)
+            .receive_challenges::<Blake2b512>(sender, chal)
             .unwrap();
         responses.insert((receiver, sender), resp);
     }
@@ -82,7 +86,7 @@ pub fn do_pairwise_base_ot<const KEY_SIZE: u16>(
 
     for ((sender, receiver), hk) in hashed_keys {
         base_ots[receiver as usize - 1]
-            .receive_hashed_keys(sender, hk)
+            .receive_hashed_keys::<Blake2b512>(sender, hk)
             .unwrap()
     }
 

@@ -13,12 +13,12 @@
 //! J = e(C2, g_hat^-1)
 //! ```
 //!
-//! Following is a description of the protocol to prove `E = F^{β}.G^{α} ∧ H = I^{β}.F^{β.s}.J^s`. This is only part of the protocol but the rest is straightforward (implemention is of the full protocol).
+//! Following is a description of the protocol to prove `E = F^{β}.G^{α} ∧ H = I^{β}.F^{β.s}.J^s`. This is only part of the protocol but the rest is straightforward (implementation is of the full protocol).
 //! Follows the notation of the paper and thus uses the multiplicative notation.
 //!
 //! The user creates `K_1 = F^s.G^r_1` and `K_2 = F^{β.s}.G^r_2` and uses the protocol for multiplicative relation among `K_1`, `K_2` and `E`
-//! to prove that the exponents of `F` in `K_2` is the product of exponents of `F` in `K_1` and `E` while also proving the equality of those exponents
-//! with the ones in `H`. Following is the detailed protocol with P and V denoting the prover and verifier respectively.
+//! to prove that the exponent of `F` in `K_2`, i.e.`β.s` is the product of exponents of `F` in `K_1`, i.e. `s` and `F` in `E` i.e. `β` while also proving the
+//! equality of that exponent with the exponents of `F` in `H` i.e. `β.s`. Following is the detailed protocol with P and V denoting the prover and verifier respectively.
 //!
 //! 1. P chooses random `r_1, r_2` and computes `K_1 = F^s.G^r_1` and `K_2 = F^{β.s}.G^r_2`. Now `K_2 = E^s.G^{r_2 - α.s}`. Let `r3 = r2 - α*s`
 //! 2. Now P starts executing the Schnorr protocol. It chooses random `θ_1, θ_2, θ_3, R_1, R_2, R_3, R_4`.
@@ -428,6 +428,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0u64);
 
         let params = SetupParams::<Bls12_381>::new::<Blake2b512>(b"test");
+        let prepared_params = PreparedSetupParams::<Bls12_381>::from(params.clone());
 
         // Signer's setup
         let isk = IssuerSecretKey::new(&mut rng);
@@ -438,11 +439,11 @@ mod tests {
         let user_id = compute_random_oracle_challenge::<Fr, Blake2b512>(b"low entropy user-id");
 
         let start = Instant::now();
-        let usk = UserSecretKey::new(user_id, &isk, params.clone());
+        let usk = UserSecretKey::new(user_id, &isk, prepared_params.clone());
         println!("Time to create user secret key {:?}", start.elapsed());
 
         let start = Instant::now();
-        usk.verify(user_id, &ipk, params.clone()).unwrap();
+        usk.verify(user_id, &ipk, prepared_params.clone()).unwrap();
         println!("Time to verify user secret key {:?}", start.elapsed());
 
         // Verifier gives message and context to user
@@ -461,7 +462,7 @@ mod tests {
             None,
             &usk,
             prepared_ipk.clone(),
-            params.clone(),
+            prepared_params.clone(),
         );
         let mut chal_bytes = vec![];
         protocol
@@ -482,7 +483,12 @@ mod tests {
         chal_bytes.extend_from_slice(msg);
         let challenge_verifier = compute_random_oracle_challenge::<Fr, Blake2b512>(&chal_bytes);
         proof
-            .verify(&challenge_verifier, Z, prepared_ipk.clone(), params.clone())
+            .verify(
+                &challenge_verifier,
+                Z,
+                prepared_ipk.clone(),
+                prepared_params.clone(),
+            )
             .unwrap();
         println!("Time to verify proof {:?}", start.elapsed());
     }

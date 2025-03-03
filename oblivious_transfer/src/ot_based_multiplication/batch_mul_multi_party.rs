@@ -1,5 +1,7 @@
-//! A multi-party multiplication protocol based on 2-party multiplication from DKLS19.
-//! This assumes that each party has already run an OT protocol with other.
+//! A multi-party multiplication protocol based on 2-party multiplication from DKLS19 where each pair of participants run
+//!  a 2-party multiplication. The multiplication is batched meaning the parties except 2 vectors of inputs and do a
+//! component-wise multiplication
+//! This assumes that each party has already run an OT protocol with others and as part of this protocol each pair of participants run an OT extension.
 //! This is described as part of protocol 4.1 of the paper [Threshold BBS+ Signatures for Distributed Anonymous Credential Issuance](https://eprint.iacr.org/2023/602)
 
 use crate::{
@@ -19,13 +21,13 @@ use ark_std::{
     rand::RngCore,
     vec::Vec,
 };
-use digest::DynDigest;
+use digest::{DynDigest, ExtendableOutput, Update};
 use dock_crypto_utils::transcript::MerlinTranscript;
 use itertools::interleave;
 
-/// The participant will acts as
-///     - a receiver in OT extension, also called Party2 in multiplication protocol, and its id is less than other participant
-///     - a sender in OT extension, also called Party1 in multiplication protocol, and its id is greater than other participant
+/// A participant of the multiplication protocol. Will acts as
+///     - a receiver in OT extension, also called Party2 in multiplication protocol, and where its id is less than other participant
+///     - a sender in OT extension, also called Party1 in multiplication protocol, and where its id is greater than other participant
 #[derive(Clone, CanonicalSerialize, CanonicalDeserialize)]
 pub struct Participant<F: PrimeField, const KAPPA: u16, const STATISTICAL_SECURITY_PARAMETER: u16> {
     pub id: ParticipantId,
@@ -66,9 +68,12 @@ pub struct ParticipantOutput<F: PrimeField> {
 impl<F: PrimeField, const KAPPA: u16, const STATISTICAL_SECURITY_PARAMETER: u16>
     Participant<F, KAPPA, STATISTICAL_SECURITY_PARAMETER>
 {
+    /// Takes input vectors `x` and `y` and does a component-wise multiplication of them. Eg.
+    /// if `x=[x_1, x_2, x_3, ..., x_n]` and `y=[y_1, y_2, y_3, ..., y_n]`, the multiplication result
+    /// is `[x_1*y_1, x_2*y_2, x_3*y_3, ..., x_n*y_n]`.
     /// The returned map contains the messages that need to be sent to the parties with corresponding
     /// key in the map
-    pub fn init<R: RngCore>(
+    pub fn init<R: RngCore, X: Default + Update + ExtendableOutput>(
         rng: &mut R,
         id: ParticipantId,
         x: Vec<F>,
@@ -113,7 +118,7 @@ impl<F: PrimeField, const KAPPA: u16, const STATISTICAL_SECURITY_PARAMETER: u16>
                 }
             } else {
                 if let Some(base_ot_keys) = base_ot_output.sender_keys.remove(&other) {
-                    let (party2, U, rlc, gamma) = Party2::new(
+                    let (party2, U, rlc, gamma) = Party2::new::<R, X>(
                         rng,
                         mult_when_ot_sendr.clone(),
                         base_ot_keys,
@@ -145,7 +150,10 @@ impl<F: PrimeField, const KAPPA: u16, const STATISTICAL_SECURITY_PARAMETER: u16>
     }
 
     /// Process received message from Party2 of multiplication protocol
-    pub fn receive_message1<D: Default + DynDigest + Clone>(
+    pub fn receive_message1<
+        D: Default + DynDigest + Clone,
+        X: Default + Update + ExtendableOutput,
+    >(
         &mut self,
         sender_id: ParticipantId,
         message: Message1<F>,
@@ -162,7 +170,7 @@ impl<F: PrimeField, const KAPPA: u16, const STATISTICAL_SECURITY_PARAMETER: u16>
         let trans = self.transcripts.get_mut(&sender_id).unwrap();
 
         let (shares, tau, r, gamma_a) =
-            party1.receive::<D>(U, rlc, gamma, trans, &gadget_vector)?;
+            party1.receive::<D, X>(U, rlc, gamma, trans, &gadget_vector)?;
         debug_assert_eq!(shares.len() as u32, 2 * self.batch_size);
         let mut z_A_0 = Vec::with_capacity(self.batch_size as usize);
         let mut z_A_1 = Vec::with_capacity(self.batch_size as usize);
@@ -246,6 +254,7 @@ pub mod tests {
         UniformRand,
     };
     use blake2::Blake2b512;
+    use sha3::Shake256;
 
     #[test]
     fn multi_party_multiplication() {
@@ -293,7 +302,7 @@ pub mod tests {
                 let a = (0..batch_size).map(|_| Fr::rand(rng)).collect::<Vec<_>>();
                 let b = (0..batch_size).map(|_| Fr::rand(rng)).collect::<Vec<_>>();
                 let start = Instant::now();
-                let (phase, U) = Participant::init(
+                let (phase, U) = Participant::init::<_, Shake256>(
                     rng,
                     i,
                     a.clone(),
@@ -317,7 +326,7 @@ pub mod tests {
                 for (receiver_id, m) in msg_1s {
                     let start = Instant::now();
                     let m2 = mult_phase[receiver_id as usize - 1]
-                        .receive_message1::<Blake2b512>(sender_id, m, &gadget_vector)
+                        .receive_message1::<Blake2b512, Shake256>(sender_id, m, &gadget_vector)
                         .unwrap();
                     times.insert(
                         receiver_id,

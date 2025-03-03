@@ -12,6 +12,7 @@ use oblivious_transfer_protocols::ot_based_multiplication::{
     dkls18_mul_2p::MultiplicationOTEParams,
     dkls19_batch_mul_2p::{GadgetVector, Party1, Party2},
 };
+use sha3::Shake256;
 
 fn batch_multiplication(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0u64);
@@ -48,28 +49,30 @@ fn batch_multiplication(c: &mut Criterion) {
 
         c.bench_function(format!("Party1 init {}", otc).as_str(), |b| {
             b.iter(|| {
-                Party1::new::<StdRng>(
+                let p = Party1::new::<StdRng>(
                     &mut rng,
                     black_box(alpha.clone()),
                     black_box(base_ot_choices.clone()),
                     black_box(base_ot_receiver_keys.clone()),
                     black_box(ote_params),
                 )
-                .unwrap()
+                .unwrap();
+                black_box(p)
             })
         });
 
         c.bench_function(format!("Party2 init {}", otc).as_str(), |b| {
             b.iter(|| {
-                Party2::new(
+                let p = Party2::new::<_, Shake256>(
                     &mut rng,
                     black_box(beta.clone()),
                     black_box(base_ot_sender_keys.clone()),
-                    &mut party2_transcript,
+                    &mut party2_transcript.clone(),
                     black_box(ote_params),
                     &gadget_vector,
                 )
-                .unwrap()
+                .unwrap();
+                black_box(p)
             })
         });
 
@@ -82,7 +85,7 @@ fn batch_multiplication(c: &mut Criterion) {
         )
         .unwrap();
 
-        let (party2, U, kos_rlc, gamma_b) = Party2::new(
+        let (party2, U, kos_rlc, gamma_b) = Party2::new::<_, Shake256>(
             &mut rng,
             beta.clone(),
             base_ot_sender_keys.clone(),
@@ -94,37 +97,56 @@ fn batch_multiplication(c: &mut Criterion) {
 
         c.bench_function(format!("Party1 creates shares for {}", otc).as_str(), |b| {
             b.iter(|| {
-                party1
+                let m = party1
                     .clone()
-                    .receive::<Blake2b512>(
+                    .receive::<Blake2b512, Shake256>(
                         black_box(U.clone()),
                         black_box(kos_rlc.clone()),
                         black_box(gamma_b.clone()),
-                        &mut party1_transcript,
+                        &mut party1_transcript.clone(),
                         &gadget_vector,
                     )
-                    .unwrap()
+                    .unwrap();
+                black_box(m)
             })
         });
 
         let (_, tau, rlc, gamma_a) = party1
-            .receive::<Blake2b512>(U, kos_rlc, gamma_b, &mut party1_transcript, &gadget_vector)
+            .receive::<Blake2b512, Shake256>(
+                U,
+                kos_rlc,
+                gamma_b,
+                &mut party1_transcript,
+                &gadget_vector,
+            )
             .unwrap();
 
         c.bench_function(format!("Party2 creates shares for {}", otc).as_str(), |b| {
             b.iter(|| {
-                party2
+                let m = party2
                     .clone()
                     .receive::<Blake2b512>(
                         black_box(tau.clone()),
                         black_box(rlc.clone()),
                         black_box(gamma_a.clone()),
-                        &mut party2_transcript,
+                        &mut party2_transcript.clone(),
                         &gadget_vector,
                     )
-                    .unwrap()
+                    .unwrap();
+                black_box(m)
             })
         });
+
+        party2
+            .clone()
+            .receive::<Blake2b512>(
+                tau.clone(),
+                rlc.clone(),
+                gamma_a.clone(),
+                &mut party2_transcript,
+                &gadget_vector,
+            )
+            .unwrap();
     }
 }
 
