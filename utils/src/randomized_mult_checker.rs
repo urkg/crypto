@@ -1,6 +1,11 @@
 use ark_ec::{AffineRepr, VariableBaseMSM};
 use ark_ff::{One, Zero};
-use ark_std::{rand::Rng, vec::Vec, UniformRand};
+use ark_std::{
+    iter::{IntoIterator, Iterator},
+    rand::Rng,
+    vec::Vec,
+    UniformRand,
+};
 
 /// Represents a scalar multiplication check of the form `G1 * a1 + G2 * a2 + G3 * a3 + ... = T`.
 /// Several checks can be added of forms either `G1 * a1 = T1` or `G1 * a1 + H1 * b1 = T2` or `G1 * a1 + H1 * b1 + J1 * c1 = T3`
@@ -13,10 +18,8 @@ use ark_std::{rand::Rng, vec::Vec, UniformRand};
 /// The single check above is simplified by combining terms of `G1`, `H1`, etc to reduce the size of the multi-scalar multiplication
 #[derive(Debug, Clone)]
 pub struct RandomizedMultChecker<G: AffineRepr> {
-    // map is more expensive than a vector here as comparing (for order relation) curve points requires serializing
-    // and hashing the points which makes it slow (checked with gxxhash and a test)
+    // map is more expensive than a vector (checked with a test)
     // args: BTreeMap<SortableAffine<G>, G::ScalarField>,
-    ///
     /// Verification will expect the multi-scalar multiplication of first and second vector to be one.
     args: (Vec<G>, Vec<G::ScalarField>),
     /// The random value chosen during creation
@@ -72,10 +75,28 @@ impl<G: AffineRepr> RandomizedMultChecker<G> {
         self.current_random *= self.random;
     }
 
+    /// Add a check of the form `<a, b> = t`. Expects `a` and `b` to be of the same length
+    pub fn add_many<'a>(
+        &mut self,
+        a: impl IntoIterator<Item = G>,
+        b: impl IntoIterator<Item = &'a G::ScalarField>,
+        t: G,
+    ) {
+        for (a_i, b_i) in a.into_iter().zip(b) {
+            self.add(a_i, self.current_random * b_i);
+        }
+        self.add(t, -self.current_random);
+        self.current_random *= self.random;
+    }
+
     /// Combine all the checks into a multi-scalar multiplication and return true if the result is 0.
     pub fn verify(&self) -> bool {
         debug_assert_eq!(self.args.0.len(), self.args.1.len());
         G::Group::msm_unchecked(&self.args.0, &self.args.1).is_zero()
+    }
+
+    pub fn len(&self) -> usize {
+        self.args.0.len()
     }
 
     fn add(&mut self, p: G, s: G::ScalarField) {
@@ -114,20 +135,7 @@ impl<G: AffineRepr> RandomizedMultChecker<G> {
 //
 // impl<G: AffineRepr> Ord for SortableAffine<G> {
 //     fn cmp(&self, other: &Self) -> Ordering {
-//         let mut b1 = vec![0_u8; self.0.compressed_size()];
-//         let mut b2 = vec![0_u8; other.0.compressed_size()];
-//         self.0.serialize_uncompressed(&mut b1).unwrap();
-//         other.0.serialize_uncompressed(&mut b2).unwrap();
-//         let seed = 1234;
-//         let h1 = gxhash128(&b1, seed);
-//         let h2 = gxhash128(&b2, seed);
-//         if h1 < h2 {
-//             Ordering::Less
-//         } else if h1 > h2 {
-//             Ordering::Greater
-//         } else {
-//             Ordering::Equal
-//         }
+//         self.0.x().cmp(&other.0.x())
 //     }
 // }
 //
@@ -264,6 +272,11 @@ mod test {
         checker.add_3(g1, &a1, g2, &a2, g3, &a3, c9);
         checker.add_3(h1, &a4, h2, &a5, h3, &a6, c10);
         checker.add_3(h1, &a2, h2, &a3, h3, &a4, c11);
+        assert!(checker.verify());
+
+        let mut checker = RandomizedMultChecker::new_using_rng(&mut rng);
+        checker.add_many([g3, h3], [&a3, &a6], c8);
+        checker.add_many([g1, g2, g3], [&a1, &a2, &a3], c9);
         assert!(checker.verify());
     }
 
