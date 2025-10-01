@@ -4,15 +4,16 @@
 //! 2. Hashed Elgamal where the message to be encrypted is a field element.
 //! 3. A more efficient, batched hashed Elgamal where multiple messages, each being a field element, are encrypted for the same public key.  
 
-use crate::{
-    aliases::FullDigest, hashing_utils::hash_to_field, msm::WindowTable,
-    serde_utils::ArkObjectBytes,
-};
+#[cfg(feature = "serde")]
+use crate::serde_utils::ArkObjectBytes;
+use crate::{aliases::FullDigest, hashing_utils::hash_to_field, msm::WindowTable};
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::PrimeField;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{cfg_iter, ops::Neg, rand::RngCore, vec::Vec, UniformRand};
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "serde")]
 use serde_with::serde_as;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -34,88 +35,74 @@ impl<F: PrimeField> SecretKey<F> {
 }
 
 impl<G: AffineRepr> PublicKey<G> {
-    pub fn new(secret_key: &SecretKey<G::ScalarField>, gen: &G) -> Self {
-        Self(gen.mul_bigint(secret_key.0.into_bigint()).into_affine())
+    pub fn new(secret_key: &SecretKey<G::ScalarField>, g: &G) -> Self {
+        Self(g.mul_bigint(secret_key.0.into_bigint()).into_affine())
     }
 }
 
-/// `gen` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
+/// `g` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
 pub fn keygen<R: RngCore, G: AffineRepr>(
     rng: &mut R,
-    gen: &G,
+    g: &G,
 ) -> (SecretKey<G::ScalarField>, PublicKey<G>) {
     let sk = SecretKey::new(rng);
-    let pk = PublicKey::new(&sk, gen);
+    let pk = PublicKey::new(&sk, g);
     (sk, pk)
 }
 
 /// Elgamal encryption of a group element `m`
-#[serde_as]
-#[derive(
-    Default,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    CanonicalSerialize,
-    CanonicalDeserialize,
-    Serialize,
-    Deserialize,
-)]
+#[cfg_attr(feature = "serde", cfg_eval::cfg_eval, serde_with::serde_as)]
+#[derive(Default, Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Ciphertext<G: AffineRepr> {
     /// `m + r * pk`
-    #[serde_as(as = "ArkObjectBytes")]
+    #[cfg_attr(feature = "serde", serde_as(as = "ArkObjectBytes"))]
     pub encrypted: G,
-    /// Ephemeral public key `r * gen`
-    #[serde_as(as = "ArkObjectBytes")]
+    /// Ephemeral public key `r * g`
+    #[cfg_attr(feature = "serde", serde_as(as = "ArkObjectBytes"))]
     pub eph_pk: G,
 }
 
 impl<G: AffineRepr> Ciphertext<G> {
     /// Returns the ciphertext and randomness created for encryption
-    /// `gen` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
-    pub fn new<R: RngCore>(
-        rng: &mut R,
-        msg: &G,
-        public_key: &G,
-        gen: &G,
-    ) -> (Self, G::ScalarField) {
+    /// `g` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
+    pub fn new<R: RngCore>(rng: &mut R, msg: &G, public_key: &G, g: &G) -> (Self, G::ScalarField) {
         let randomness = G::ScalarField::rand(rng);
         (
-            Self::new_given_randomness(msg, &randomness, public_key, gen),
+            Self::new_given_randomness(msg, &randomness, public_key, g),
             randomness,
         )
     }
 
     /// Returns the ciphertext
-    /// `gen` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
+    /// `g` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
     pub fn new_given_randomness(
         msg: &G,
         randomness: &G::ScalarField,
         public_key: &G,
-        gen: &G,
+        g: &G,
     ) -> Self {
         let b = randomness.into_bigint();
         let encrypted = (public_key.mul_bigint(b) + msg).into_affine();
         Self {
             encrypted,
-            eph_pk: gen.mul_bigint(b).into_affine(),
+            eph_pk: g.mul_bigint(b).into_affine(),
         }
     }
 
     /// Returns the ciphertext but takes the window tables for the public key and generator. Useful when a lot
     /// of encryptions have to be done using the same public key
-    /// `gen` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
+    /// `g` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
     pub fn new_given_randomness_and_window_tables(
         msg: &G,
         randomness: &G::ScalarField,
         public_key: &WindowTable<G::Group>,
-        gen: &WindowTable<G::Group>,
+        g: &WindowTable<G::Group>,
     ) -> Self {
         let encrypted = ((public_key * randomness) + msg).into_affine();
         Self {
             encrypted,
-            eph_pk: gen.multiply(randomness).into_affine(),
+            eph_pk: g.multiply(randomness).into_affine(),
         }
     }
 
@@ -126,73 +113,63 @@ impl<G: AffineRepr> Ciphertext<G> {
 
 /// Hashed Elgamal. Encryption of a field element `m`. The shared secret is hashed to a field element
 /// and the result is added to the message to get the ciphertext.
-#[serde_as]
-#[derive(
-    Default,
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    CanonicalSerialize,
-    CanonicalDeserialize,
-    Serialize,
-    Deserialize,
-)]
+#[cfg_attr(feature = "serde", cfg_eval::cfg_eval, serde_with::serde_as)]
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct HashedElgamalCiphertext<G: AffineRepr> {
     /// `m + Hash(r * pk)`
-    #[serde_as(as = "ArkObjectBytes")]
+    #[cfg_attr(feature = "serde", serde_as(as = "ArkObjectBytes"))]
     pub encrypted: G::ScalarField,
-    /// Ephemeral public key `r * gen`
-    #[serde_as(as = "ArkObjectBytes")]
+    /// Ephemeral public key `r * g`
+    #[cfg_attr(feature = "serde", serde_as(as = "ArkObjectBytes"))]
     pub eph_pk: G,
 }
 
 impl<G: AffineRepr> HashedElgamalCiphertext<G> {
     /// Returns the ciphertext and randomness created for encryption
-    /// `gen` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
+    /// `g` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
     pub fn new<R: RngCore, D: FullDigest>(
         rng: &mut R,
         msg: &G::ScalarField,
         public_key: &G,
-        gen: &G,
+        g: &G,
     ) -> (Self, G::ScalarField) {
         let randomness = G::ScalarField::rand(rng);
         (
-            Self::new_given_randomness::<D>(msg, &randomness, public_key, gen),
+            Self::new_given_randomness::<D>(msg, &randomness, public_key, g),
             randomness,
         )
     }
 
     /// Returns the ciphertext
-    /// `gen` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
+    /// `g` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
     pub fn new_given_randomness<D: FullDigest>(
         msg: &G::ScalarField,
         randomness: &G::ScalarField,
         public_key: &G,
-        gen: &G,
+        g: &G,
     ) -> Self {
         let b = randomness.into_bigint();
         let shared_secret = public_key.mul_bigint(b).into_affine();
         Self {
             encrypted: Self::otp::<D>(shared_secret) + msg,
-            eph_pk: gen.mul_bigint(b).into_affine(),
+            eph_pk: g.mul_bigint(b).into_affine(),
         }
     }
 
     /// Returns the ciphertext but takes the window tables for the public key and generator. Useful when a lot
     /// of encryptions have to be done using the same public key
-    /// `gen` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
+    /// `g` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
     pub fn new_given_randomness_and_window_tables<D: FullDigest>(
         msg: &G::ScalarField,
         randomness: &G::ScalarField,
         public_key: &WindowTable<G::Group>,
-        gen: &WindowTable<G::Group>,
+        g: &WindowTable<G::Group>,
     ) -> Self {
         let shared_secret = public_key.multiply(randomness).into_affine();
         Self {
             encrypted: Self::otp::<D>(shared_secret) + msg,
-            eph_pk: gen.multiply(randomness).into_affine(),
+            eph_pk: g.multiply(randomness).into_affine(),
         }
     }
 
@@ -215,72 +192,63 @@ impl<G: AffineRepr> HashedElgamalCiphertext<G> {
 /// message to get the ciphertext. This is an efficient mechanism of encrypting multiple messages to the same
 /// public key as there is only 1 shared secret created by a scalar multiplication and one randomness chosen
 /// by the encryptor
-#[serde_as]
-#[derive(
-    Default,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    CanonicalSerialize,
-    CanonicalDeserialize,
-    Serialize,
-    Deserialize,
-)]
+#[cfg_attr(feature = "serde", cfg_eval::cfg_eval, serde_with::serde_as)]
+#[derive(Default, Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BatchedHashedElgamalCiphertext<G: AffineRepr> {
     /// `m_i + Hash((r * pk) || i)`
-    #[serde_as(as = "Vec<ArkObjectBytes>")]
+    #[cfg_attr(feature = "serde", serde_as(as = "Vec<ArkObjectBytes>"))]
     pub encrypted: Vec<G::ScalarField>,
-    /// Ephemeral public key `r * gen`
-    #[serde_as(as = "ArkObjectBytes")]
+    /// Ephemeral public key `r * g`
+    #[cfg_attr(feature = "serde", serde_as(as = "ArkObjectBytes"))]
     pub eph_pk: G,
 }
 
 impl<G: AffineRepr> BatchedHashedElgamalCiphertext<G> {
     /// Returns the ciphertext and randomness created for encryption
-    /// `gen` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
+    /// `g` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
     pub fn new<R: RngCore, D: FullDigest>(
         rng: &mut R,
         msgs: &[G::ScalarField],
         public_key: &G,
-        gen: &G,
+        g: &G,
     ) -> (Self, G::ScalarField) {
         let randomness = G::ScalarField::rand(rng);
         (
-            Self::new_given_randomness::<D>(msgs, &randomness, public_key, gen),
+            Self::new_given_randomness::<D>(msgs, &randomness, public_key, g),
             randomness,
         )
     }
 
     /// Returns the ciphertext
-    /// `gen` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
+    /// `g` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
     pub fn new_given_randomness<D: FullDigest>(
         msgs: &[G::ScalarField],
         randomness: &G::ScalarField,
         public_key: &G,
-        gen: &G,
+        g: &G,
     ) -> Self {
         let b = randomness.into_bigint();
         let shared_secret = public_key.mul_bigint(b).into_affine();
         Self {
             encrypted: Self::enc_with_otp::<D>(&msgs, &shared_secret),
-            eph_pk: gen.mul_bigint(b).into_affine(),
+            eph_pk: g.mul_bigint(b).into_affine(),
         }
     }
 
     /// Returns the ciphertext but takes the window tables for the public key and generator. Useful when a lot
     /// of encryptions have to be done using the same public key
-    /// `gen` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
+    /// `g` is the generator used in the scheme to generate public key and ephemeral public key by sender/encryptor
     pub fn new_given_randomness_and_window_tables<D: FullDigest>(
         msgs: &[G::ScalarField],
         randomness: &G::ScalarField,
         public_key: &WindowTable<G::Group>,
-        gen: &WindowTable<G::Group>,
+        g: &WindowTable<G::Group>,
     ) -> Self {
         let shared_secret = public_key.multiply(randomness).into_affine();
         Self {
             encrypted: Self::enc_with_otp::<D>(&msgs, &shared_secret),
-            eph_pk: gen.multiply(randomness).into_affine(),
+            eph_pk: g.multiply(randomness).into_affine(),
         }
     }
 
@@ -331,11 +299,11 @@ pub mod tests {
         let mut rng = StdRng::seed_from_u64(0u64);
 
         fn check<G: AffineRepr>(rng: &mut StdRng) {
-            let gen = G::Group::rand(rng).into_affine();
-            let (sk, pk) = keygen(rng, &gen);
+            let g = G::Group::rand(rng).into_affine();
+            let (sk, pk) = keygen(rng, &g);
 
             let msg = G::Group::rand(rng).into_affine();
-            let (ciphertext, _) = Ciphertext::new(rng, &msg, &pk.0, &gen);
+            let (ciphertext, _) = Ciphertext::new(rng, &msg, &pk.0, &g);
             assert_eq!(ciphertext.decrypt(&sk.0), msg);
         }
 
@@ -348,12 +316,12 @@ pub mod tests {
         let mut rng = StdRng::seed_from_u64(0u64);
 
         fn check<G: AffineRepr>(rng: &mut StdRng) {
-            let gen = G::Group::rand(rng).into_affine();
-            let (sk, pk) = keygen(rng, &gen);
+            let g = G::Group::rand(rng).into_affine();
+            let (sk, pk) = keygen(rng, &g);
 
             let msg = G::ScalarField::rand(rng);
             let (ciphertext, _) =
-                HashedElgamalCiphertext::new::<_, Blake2b512>(rng, &msg, &pk.0, &gen);
+                HashedElgamalCiphertext::new::<_, Blake2b512>(rng, &msg, &pk.0, &g);
             assert_eq!(ciphertext.decrypt::<Blake2b512>(&sk.0), msg);
         }
 
@@ -366,8 +334,8 @@ pub mod tests {
         let mut rng = StdRng::seed_from_u64(0u64);
 
         fn check<G: AffineRepr>(rng: &mut StdRng) {
-            let gen = G::Group::rand(rng).into_affine();
-            let (sk, pk) = keygen(rng, &gen);
+            let g = G::Group::rand(rng).into_affine();
+            let (sk, pk) = keygen(rng, &g);
             let count = 10;
 
             let msgs = (0..count)
@@ -378,7 +346,7 @@ pub mod tests {
             for i in 0..count {
                 let start = Instant::now();
                 let (ciphertext, _) =
-                    HashedElgamalCiphertext::new::<_, Blake2b512>(rng, &msgs[i], &pk.0, &gen);
+                    HashedElgamalCiphertext::new::<_, Blake2b512>(rng, &msgs[i], &pk.0, &g);
                 enc_time += start.elapsed();
                 let start = Instant::now();
                 assert_eq!(ciphertext.decrypt::<Blake2b512>(&sk.0), msgs[i]);
@@ -391,7 +359,7 @@ pub mod tests {
 
             let start = Instant::now();
             let (ciphertext, _) =
-                BatchedHashedElgamalCiphertext::new::<_, Blake2b512>(rng, &msgs, &pk.0, &gen);
+                BatchedHashedElgamalCiphertext::new::<_, Blake2b512>(rng, &msgs, &pk.0, &g);
             enc_time = start.elapsed();
             let start = Instant::now();
             assert_eq!(ciphertext.decrypt::<Blake2b512>(&sk.0), msgs);

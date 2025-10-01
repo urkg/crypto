@@ -5,11 +5,12 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{cfg_into_iter, cfg_iter, collections::BTreeMap, vec, vec::Vec};
 use core::fmt::Debug;
 use digest::Digest;
-use dock_crypto_utils::{
-    affine_group_element_from_byte_slices, commitment::PedersenCommitmentKey,
-    serde_utils::ArkObjectBytes,
-};
+#[cfg(feature = "serde")]
+use dock_crypto_utils::serde_utils::ArkObjectBytes;
+use dock_crypto_utils::{affine_group_element_from_byte_slices, commitment::PedersenCommitmentKey};
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "serde")]
 use serde_with::{serde_as, Same};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -23,7 +24,7 @@ pub type ShareId = u16;
 pub type ParticipantId = u16;
 
 /// Share used in Shamir secret sharing and Feldman verifiable secret sharing
-#[serde_as]
+#[cfg_attr(feature = "serde", cfg_eval::cfg_eval, serde_with::serde_as)]
 #[derive(
     Default,
     Clone,
@@ -34,28 +35,26 @@ pub type ParticipantId = u16;
     ZeroizeOnDrop,
     CanonicalSerialize,
     CanonicalDeserialize,
-    Serialize,
-    Deserialize,
 )]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Share<F: PrimeField> {
     #[zeroize(skip)]
     pub id: ShareId,
     #[zeroize(skip)]
     pub threshold: ShareId,
-    #[serde_as(as = "ArkObjectBytes")]
+    #[cfg_attr(feature = "serde", serde_as(as = "ArkObjectBytes"))]
     pub share: F,
 }
 
 /// Collection of `Share`s. A sufficient number of `Share`s reconstruct the secret.
 /// Expects unique shares, i.e. each share has a different `ShareId` and each has the same threshold.
-#[derive(
-    Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize,
-)]
-#[serde(bound = "")]
+#[derive(Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(bound = ""))]
 pub struct Shares<F: PrimeField>(pub Vec<Share<F>>);
 
 /// Share used in Pedersen verifiable secret sharing
-#[serde_as]
+#[cfg_attr(feature = "serde", cfg_eval::cfg_eval, serde_with::serde_as)]
 #[derive(
     Default,
     Clone,
@@ -66,46 +65,35 @@ pub struct Shares<F: PrimeField>(pub Vec<Share<F>>);
     ZeroizeOnDrop,
     CanonicalSerialize,
     CanonicalDeserialize,
-    Serialize,
-    Deserialize,
 )]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct VerifiableShare<F: PrimeField> {
     #[zeroize(skip)]
     pub id: ShareId,
     #[zeroize(skip)]
     pub threshold: ShareId,
-    #[serde_as(as = "ArkObjectBytes")]
+    #[cfg_attr(feature = "serde", serde_as(as = "ArkObjectBytes"))]
     pub secret_share: F,
-    #[serde_as(as = "ArkObjectBytes")]
+    #[cfg_attr(feature = "serde", serde_as(as = "ArkObjectBytes"))]
     pub blinding_share: F,
 }
 
 /// Collection of `VerifiableShares`s. A sufficient number of `VerifiableShares`s reconstruct the secret.
 /// Expects unique shares, i.e. each share has a different `ShareId` and each has the same threshold.
-#[derive(
-    Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize,
-)]
-#[serde(bound = "")]
+#[derive(Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(bound = ""))]
 pub struct VerifiableShares<F: PrimeField>(pub Vec<VerifiableShare<F>>);
 
 /// Commitments to coefficients of the polynomial created during secret sharing. Each commitment
 /// in the vector could be a Pedersen commitment or a computationally hiding and computationally binding
 /// commitment (scalar multiplication of the coefficient with a public group element). The former is used
 /// in Pedersen secret sharing and the latter in Feldman
-#[serde_as]
-#[derive(
-    Default,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    CanonicalSerialize,
-    CanonicalDeserialize,
-    Serialize,
-    Deserialize,
-)]
+#[cfg_attr(feature = "serde", cfg_eval::cfg_eval, serde_with::serde_as)]
+#[derive(Default, Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CommitmentToCoefficients<G: AffineRepr>(
-    #[serde_as(as = "Vec<ArkObjectBytes>")] pub Vec<G>,
+    #[cfg_attr(feature = "serde", serde_as(as = "Vec<ArkObjectBytes>"))] pub Vec<G>,
 );
 
 impl<F: PrimeField> From<(ShareId, ShareId, F)> for Share<F> {
@@ -245,16 +233,15 @@ impl<G: AffineRepr> SecretShare<G> for VerifiableShare<G::ScalarField> {
 }
 
 /// Used by a participant to store received shares and commitment coefficients.
-#[serde_as]
-#[derive(
-    Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize,
-)]
-#[serde(bound = "")]
+#[cfg_attr(feature = "serde", cfg_eval::cfg_eval, serde_with::serde_as)]
+#[derive(Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(bound = ""))]
 pub struct SharesAccumulator<G: AffineRepr, S: SecretShare<G>> {
     pub participant_id: ParticipantId,
     pub threshold: ShareId,
     /// Stores its own and received shares
-    #[serde_as(as = "BTreeMap<Same, ArkObjectBytes>")]
+    #[cfg_attr(feature = "serde", serde_as(as = "BTreeMap<Same, ArkObjectBytes>"))]
     pub shares: BTreeMap<ParticipantId, S>,
     pub coeff_comms: BTreeMap<ParticipantId, CommitmentToCoefficients<G>>,
 }
@@ -307,7 +294,7 @@ impl<G: AffineRepr, S: SecretShare<G>> SharesAccumulator<G, S> {
     }
 
     /// Compute the final share after receiving shares from all other participants.
-    pub fn gen_final_share<'a>(
+    pub fn gen_final_share(
         participant_id: ParticipantId,
         threshold: ShareId,
         shares: BTreeMap<ParticipantId, S>,
@@ -320,7 +307,7 @@ impl<G: AffineRepr, S: SecretShare<G>> SharesAccumulator<G, S> {
             return Err(SSError::BelowThreshold(threshold, len));
         }
 
-        let final_share = S::compute_final(shares.values().cloned().into_iter().collect());
+        let final_share = S::compute_final(shares.values().cloned().collect());
         let mut final_comm_coeffs = vec![G::Group::zero(); threshold as usize];
 
         for comm in coeff_comms.values() {
@@ -374,7 +361,7 @@ impl<G: AffineRepr, S: SecretShare<G>> SharesAccumulator<G, S> {
 impl<G: AffineRepr> SharesAccumulator<G, VerifiableShare<G::ScalarField>> {
     /// Called by a participant when it has received shares from all participants. Computes the final
     /// share of the distributed secret
-    pub fn finalize<'a>(
+    pub fn finalize(
         mut self,
         ck: &PedersenCommitmentKey<G>,
     ) -> Result<VerifiableShare<G::ScalarField>, SSError> {
@@ -387,7 +374,7 @@ impl<G: AffineRepr> SharesAccumulator<G, VerifiableShare<G::ScalarField>> {
 impl<G: AffineRepr> SharesAccumulator<G, Share<G::ScalarField>> {
     /// Called by a participant when it has received shares from all participants. Computes the final
     /// share of the distributed secret, own public key and the threshold public key
-    pub fn finalize<'a>(mut self, ck: &G) -> Result<(Share<G::ScalarField>, G, G), SSError> {
+    pub fn finalize(mut self, ck: &G) -> Result<(Share<G::ScalarField>, G, G), SSError> {
         let shares = core::mem::take(&mut self.shares);
         let comms = core::mem::take(&mut self.coeff_comms);
         Self::gen_final_share_and_public_key(self.participant_id, self.threshold, shares, comms, ck)
@@ -395,7 +382,7 @@ impl<G: AffineRepr> SharesAccumulator<G, Share<G::ScalarField>> {
 
     /// Compute the final share after receiving shares from all other participants. Also returns
     /// own public key and the threshold public key
-    pub fn gen_final_share_and_public_key<'a>(
+    pub fn gen_final_share_and_public_key(
         participant_id: ParticipantId,
         threshold: ShareId,
         shares: BTreeMap<ParticipantId, Share<G::ScalarField>>,
@@ -414,11 +401,12 @@ impl<G: AffineRepr> SharesAccumulator<G, Share<G::ScalarField>> {
 }
 
 /// The elliptic curve base point which is multiplied by the secret key to generate the public key
-#[serde_as]
-#[derive(
-    Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize, Serialize, Deserialize,
-)]
-pub struct PublicKeyBase<G: AffineRepr>(#[serde_as(as = "ArkObjectBytes")] pub G);
+#[cfg_attr(feature = "serde", cfg_eval::cfg_eval, serde_with::serde_as)]
+#[derive(Clone, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct PublicKeyBase<G: AffineRepr>(
+    #[cfg_attr(feature = "serde", serde_as(as = "ArkObjectBytes"))] pub G,
+);
 
 impl<G: AffineRepr> PublicKeyBase<G> {
     pub fn new<D: Digest>(label: &[u8]) -> Self {
